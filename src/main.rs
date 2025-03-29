@@ -7,7 +7,6 @@ use rand::Rng;
 use std::collections::LinkedList;
 
 const FOOD_COLOR: Color = [0.80, 0.00, 0.00, 1.0];
-const SNAKE_COLOR: Color = [0.00, 0.80, 0.00, 1.0];
 const BORDER_COLOR: Color = [0.00, 0.00, 0.00, 1.0];
 const GAMEOVER_COLOR: Color = [0.90, 0.00, 0.00, 0.5];
 
@@ -19,6 +18,29 @@ const SNAKE_BLOCK_SIZE: f64 = 10.0;
 const BORDER_WIDTH: f64 = 1.0;
 const BOARD_WIDTH: u32 = 50;
 const BOARD_HEIGHT: u32 = 50;
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color {
+    let h = h % 1.0;
+    let hi = (h * 6.0).floor() as i32;
+    let f = h * 6.0 - hi as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+
+    match hi {
+        0 => [v, t, p, 1.0],
+        1 => [q, v, p, 1.0],
+        2 => [p, v, t, 1.0],
+        3 => [p, q, v, 1.0],
+        4 => [t, p, v, 1.0],
+        _ => [v, p, q, 1.0],
+    }
+}
+
+fn get_rainbow_color(index: usize, time_offset: f64) -> Color {
+    let hue = ((index as f64 * 0.05 + time_offset * 0.3) % 1.0) as f32;
+    hsv_to_rgb(hue, 0.8, 0.8)
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Direction {
@@ -147,6 +169,7 @@ struct Game {
     height: i32,
     game_over: bool,
     waiting_time: f64,
+    total_time: f64, 
 }
 
 impl Game {
@@ -160,6 +183,7 @@ impl Game {
             height,
             game_over: false,
             waiting_time: 0.0,
+            total_time: 0.0, 
         }
     }
 
@@ -192,10 +216,12 @@ impl Game {
         self.food_y = 4;
         self.game_over = false;
         self.waiting_time = 0.0;
+        self.total_time = 0.0; 
     }
 
     fn update(&mut self, delta_time: f64) {
         self.waiting_time += delta_time;
+        self.total_time += delta_time; 
 
         if self.game_over {
             if self.waiting_time > RESTART_TIME {
@@ -253,17 +279,17 @@ impl Game {
     }
 
     fn draw(&self, con: &Context, g: &mut G2d) {
-        // Draw board
+        let mut i = 0;
         for block in &self.snake.body {
-            draw_block(SNAKE_COLOR, block.x, block.y, con, g);
+            let color = get_rainbow_color(i, self.total_time);
+            draw_block(color, block.x, block.y, con, g);
+            i += 1;
         }
 
-        // Draw food
         if self.food_exists {
             draw_block(FOOD_COLOR, self.food_x, self.food_y, con, g);
         }
 
-        // Draw border
         draw_rectangle(
             BORDER_COLOR,
             0,
@@ -301,7 +327,6 @@ impl Game {
             g,
         );
 
-        // Draw game over
         if self.game_over {
             draw_rectangle(
                 GAMEOVER_COLOR,
