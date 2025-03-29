@@ -13,9 +13,7 @@ const GAMEOVER_COLOR: Color = [0.90, 0.00, 0.00, 0.5];
 const MOVING_PERIOD: f64 = 0.1;
 const RESTART_TIME: f64 = 1.0;
 
-const FOOD_SIZE: f64 = 10.0;
 const SNAKE_BLOCK_SIZE: f64 = 10.0;
-const BORDER_WIDTH: f64 = 1.0;
 const BOARD_WIDTH: u32 = 50;
 const BOARD_HEIGHT: u32 = 50;
 
