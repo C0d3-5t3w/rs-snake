@@ -1,17 +1,21 @@
 extern crate piston_window;
 extern crate rand;
 
-use piston_window::*;
 use piston_window::types::Color;
+use piston_window::*;
 use rand::Rng;
 use std::collections::LinkedList;
 
 const FOOD_COLOR: Color = [0.80, 0.00, 0.00, 1.0];
 const BORDER_COLOR: Color = [0.00, 0.00, 0.00, 1.0];
 const GAMEOVER_COLOR: Color = [0.90, 0.00, 0.00, 0.5];
+const GHOST_COLOR: Color = [0.50, 0.50, 1.00, 0.7];
 
 const MOVING_PERIOD: f64 = 0.1;
 const RESTART_TIME: f64 = 1.0;
+const GHOST_MOVE_PERIOD: f64 = MOVING_PERIOD * 2.0;
+const GHOST_SPAWN_TIME: f64 = 5.0;
+const GHOST_LIFETIME: f64 = 8.0;
 
 const SNAKE_BLOCK_SIZE: f64 = 10.0;
 const BOARD_WIDTH: u32 = 50;
@@ -158,6 +162,57 @@ impl Snake {
     }
 }
 
+struct Ghost {
+    x: i32,
+    y: i32,
+    direction: Direction,
+    spawn_time: f64,
+    move_timer: f64,
+}
+
+impl Ghost {
+    fn new(x: i32, y: i32, spawn_time: f64) -> Ghost {
+        let mut rng = rand::thread_rng();
+        let direction = match rng.gen_range(0..4) {
+            0 => Direction::Up,
+            1 => Direction::Down,
+            2 => Direction::Left,
+            _ => Direction::Right,
+        };
+
+        Ghost {
+            x,
+            y,
+            direction,
+            spawn_time,
+            move_timer: 0.0,
+        }
+    }
+
+    fn update_direction(&mut self) {
+        let mut rng = rand::thread_rng();
+        if rng.gen_bool(0.2) {
+            self.direction = match rng.gen_range(0..4) {
+                0 => Direction::Up,
+                1 => Direction::Down,
+                2 => Direction::Left,
+                _ => Direction::Right,
+            };
+        }
+    }
+
+    fn move_forward(&mut self, width: i32, height: i32) {
+        self.update_direction();
+
+        match self.direction {
+            Direction::Up => self.y = (self.y - 1).max(1),
+            Direction::Down => self.y = (self.y + 1).min(height - 2),
+            Direction::Left => self.x = (self.x - 1).max(1),
+            Direction::Right => self.x = (self.x + 1).min(width - 2),
+        }
+    }
+}
+
 struct Game {
     snake: Snake,
     food_exists: bool,
@@ -167,7 +222,9 @@ struct Game {
     height: i32,
     game_over: bool,
     waiting_time: f64,
-    total_time: f64, 
+    total_time: f64,
+    ghosts: Vec<Ghost>,
+    ghost_spawn_timer: f64,
 }
 
 impl Game {
@@ -181,7 +238,9 @@ impl Game {
             height,
             game_over: false,
             waiting_time: 0.0,
-            total_time: 0.0, 
+            total_time: 0.0,
+            ghosts: Vec::new(),
+            ghost_spawn_timer: 0.0,
         }
     }
 
@@ -214,12 +273,15 @@ impl Game {
         self.food_y = 4;
         self.game_over = false;
         self.waiting_time = 0.0;
-        self.total_time = 0.0; 
+        self.total_time = 0.0;
+        self.ghosts.clear();
+        self.ghost_spawn_timer = 0.0;
     }
 
     fn update(&mut self, delta_time: f64) {
         self.waiting_time += delta_time;
-        self.total_time += delta_time; 
+        self.total_time += delta_time;
+        self.ghost_spawn_timer += delta_time;
 
         if self.game_over {
             if self.waiting_time > RESTART_TIME {
@@ -232,9 +294,48 @@ impl Game {
             self.add_food();
         }
 
+        self.update_ghosts(delta_time);
+
         if self.waiting_time > MOVING_PERIOD {
             self.update_snake(None);
         }
+    }
+
+    fn update_ghosts(&mut self, delta_time: f64) {
+        if self.ghost_spawn_timer >= GHOST_SPAWN_TIME {
+            self.ghost_spawn_timer = 0.0;
+            self.spawn_ghost();
+        }
+
+        self.ghosts
+            .retain(|ghost| self.total_time - ghost.spawn_time < GHOST_LIFETIME);
+
+        let (head_x, head_y) = self.snake.head_position();
+        for ghost in &mut self.ghosts {
+            ghost.move_timer += delta_time;
+            if ghost.move_timer >= GHOST_MOVE_PERIOD {
+                ghost.move_timer = 0.0;
+                ghost.move_forward(self.width, self.height);
+
+                if ghost.x == head_x && ghost.y == head_y {
+                    self.game_over = true;
+                }
+            }
+        }
+    }
+
+    fn spawn_ghost(&mut self) {
+        let mut rng = rand::thread_rng();
+        let mut new_x = rng.gen_range(1..(self.width - 1));
+        let mut new_y = rng.gen_range(1..(self.height - 1));
+
+        let (head_x, head_y) = self.snake.head_position();
+        while (new_x == head_x && new_y == head_y) || self.snake.overlap_tail(new_x, new_y) {
+            new_x = rng.gen_range(1..(self.width - 1));
+            new_y = rng.gen_range(1..(self.height - 1));
+        }
+
+        self.ghosts.push(Ghost::new(new_x, new_y, self.total_time));
     }
 
     fn check_eating(&mut self) {
@@ -284,57 +385,21 @@ impl Game {
             i += 1;
         }
 
+        for ghost in &self.ghosts {
+            draw_block(GHOST_COLOR, ghost.x, ghost.y, con, g);
+        }
+
         if self.food_exists {
             draw_block(FOOD_COLOR, self.food_x, self.food_y, con, g);
         }
 
-        draw_rectangle(
-            BORDER_COLOR,
-            0,
-            0,
-            self.width,
-            1,
-            con,
-            g,
-        );
-        draw_rectangle(
-            BORDER_COLOR,
-            0,
-            self.height - 1,
-            self.width,
-            1,
-            con,
-            g,
-        );
-        draw_rectangle(
-            BORDER_COLOR,
-            0,
-            0,
-            1,
-            self.height,
-            con,
-            g,
-        );
-        draw_rectangle(
-            BORDER_COLOR,
-            self.width - 1,
-            0,
-            1,
-            self.height,
-            con,
-            g,
-        );
+        draw_rectangle(BORDER_COLOR, 0, 0, self.width, 1, con, g);
+        draw_rectangle(BORDER_COLOR, 0, self.height - 1, self.width, 1, con, g);
+        draw_rectangle(BORDER_COLOR, 0, 0, 1, self.height, con, g);
+        draw_rectangle(BORDER_COLOR, self.width - 1, 0, 1, self.height, con, g);
 
         if self.game_over {
-            draw_rectangle(
-                GAMEOVER_COLOR,
-                0,
-                0,
-                self.width,
-                self.height,
-                con,
-                g,
-            );
+            draw_rectangle(GAMEOVER_COLOR, 0, 0, self.width, self.height, con, g);
         }
     }
 }
@@ -345,29 +410,27 @@ fn draw_block(color: Color, x: i32, y: i32, con: &Context, g: &mut G2d) {
 
     rectangle(
         color,
-        [
-            gui_x,
-            gui_y,
-            SNAKE_BLOCK_SIZE,
-            SNAKE_BLOCK_SIZE,
-        ],
+        [gui_x, gui_y, SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE],
         con.transform,
         g,
     );
 }
 
-fn draw_rectangle(color: Color, x: i32, y: i32, width: i32, height: i32, con: &Context, g: &mut G2d) {
+fn draw_rectangle(
+    color: Color,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    con: &Context,
+    g: &mut G2d,
+) {
     let x = (x as f64) * SNAKE_BLOCK_SIZE;
     let y = (y as f64) * SNAKE_BLOCK_SIZE;
     let width = (width as f64) * SNAKE_BLOCK_SIZE;
     let height = (height as f64) * SNAKE_BLOCK_SIZE;
 
-    rectangle(
-        color,
-        [x, y, width, height],
-        con.transform,
-        g,
-    );
+    rectangle(color, [x, y, width, height], con.transform, g);
 }
 
 fn main() {
@@ -384,17 +447,17 @@ fn main() {
     .unwrap();
 
     let mut game = Game::new(width as i32, height as i32);
-    
+
     while let Some(event) = window.next() {
         if let Some(Button::Keyboard(key)) = event.press_args() {
             game.key_pressed(key);
         }
-        
+
         window.draw_2d(&event, |c, g, _| {
             clear([0.5, 0.5, 0.5, 1.0], g);
             game.draw(&c, g);
         });
-        
+
         event.update(|args| {
             game.update(args.dt);
         });
